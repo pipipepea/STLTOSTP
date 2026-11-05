@@ -16,7 +16,7 @@ from .tasks import celery, convert_job
 
 @asynccontextmanager
 async def lifespan(app):
-    if len(API_KEY) < 24:
+    if len(API_KEY) < 24 or API_KEY == 'replace-with-a-random-secret-at-least-24-characters':
         raise RuntimeError('Set API_KEY to a random secret of at least 24 characters.')
     DATA.mkdir(parents=True, exist_ok=True)
     yield

@@ -8,7 +8,7 @@ import trimesh
 
 base = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:8080'
 key = os.environ['API_KEY']
-with httpx.Client(base_url=base, timeout=30) as client:
+with httpx.Client(base_url=base, timeout=30, trust_env=False) as client:
     client.get('/api/health').raise_for_status()
     mesh = trimesh.creation.box(extents=[20, 30, 12])
     response = client.post('/api/jobs', headers={'X-API-Key': key},
