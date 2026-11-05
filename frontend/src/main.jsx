@@ -19,6 +19,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import Viewer from "./Viewer";
+import CurveReport from "./CurveReport";
 import "./style.css";
 
 const EMPTY = [];
@@ -91,6 +92,45 @@ function demoFile() {
     { type: "model/stl" },
   );
 }
+function cylinderDemoFile() {
+  const vertices = [
+      [0, 0, 0],
+      [0, 0, 12],
+    ],
+    faces = [];
+  const count = 64;
+  for (let i = 0; i < count; i++) {
+    const a = (i * 2 * Math.PI) / count;
+    vertices.push(
+      [5 * Math.cos(a), 5 * Math.sin(a), 0],
+      [5 * Math.cos(a), 5 * Math.sin(a), 12],
+    );
+  }
+  for (let i = 0; i < count; i++) {
+    const bottom = 2 + i * 2,
+      top = bottom + 1;
+    const nextBottom = 2 + ((i + 1) % count) * 2,
+      nextTop = nextBottom + 1;
+    faces.push(
+      [0, nextBottom, bottom],
+      [1, top, nextTop],
+      [bottom, nextBottom, nextTop],
+      [bottom, nextTop, top],
+    );
+  }
+  const stl =
+    "solid cylinder\n" +
+    faces
+      .map(
+        (f) =>
+          "facet normal 0 0 0\nouter loop\n" +
+          f.map((i) => "vertex " + vertices[i].join(" ")).join("\n") +
+          "\nendloop\nendfacet",
+      )
+      .join("\n") +
+    "\nendsolid cylinder";
+  return new File([stl], "sample-cylinder-r5-h12.stl", { type: "model/stl" });
+}
 function App() {
   const [file, setFile] = useState(null),
     [source, setSource] = useState(null),
@@ -100,6 +140,9 @@ function App() {
     [merge, setMerge] = useState(true),
     [wire, setWire] = useState(false),
     [showIssues, setShowIssues] = useState(true);
+  const [curveMode, setCurveMode] = useState("auto");
+  const [fitTolerance, setFitTolerance] = useState("0.05");
+  const [volumeLimit, setVolumeLimit] = useState("2");
   const [busy, setBusy] = useState(false),
     [reading, setReading] = useState(false),
     [job, setJob] = useState(null),
@@ -146,6 +189,19 @@ function App() {
     }
   }
   async function start() {
+    if (
+      curveMode !== "off" &&
+      (!Number.isFinite(Number(fitTolerance)) ||
+        Number(fitTolerance) <= 0 ||
+        !Number.isFinite(Number(volumeLimit)) ||
+        Number(volumeLimit) <= 0 ||
+        Number(volumeLimit) > 5)
+    ) {
+      setError(
+        "Dung sai phải lớn hơn 0; giới hạn thay đổi thể tích từ lớn hơn 0 đến 5%.",
+      );
+      return;
+    }
     if (!key) {
       setKeyOpen(true);
       return;
@@ -164,6 +220,12 @@ function App() {
       form.append("file", file);
       form.append("unit", unit);
       form.append("merge_planes", String(merge));
+      form.append("curve_mode", curveMode);
+      form.append("fit_tolerance", curveMode === "off" ? "0.05" : fitTolerance);
+      form.append(
+        "max_volume_change",
+        curveMode === "off" ? "0.02" : String(Number(volumeLimit) / 100),
+      );
       const r = await fetch("/api/jobs", {
         method: "POST",
         headers: { "X-API-Key": key },
@@ -337,7 +399,7 @@ function App() {
               </p>
             </div>
             <div className="version">
-              BẢN ĐẦU <b>v0.1</b>
+              ANALYTIC SURFACES <b>v0.2</b>
             </div>
           </div>
           <div className="workflow">
@@ -394,20 +456,29 @@ function App() {
                 </span>
                 <small>.STL · Tối đa 30 MB / 30.000 mặt</small>
               </button>
-              <input
-                ref={input}
-                type="file"
-                accept=".stl"
-                hidden
-                onChange={(e) => choose(e.target.files[0])}
-              />
-              <button
-                className="sample"
-                disabled={busy || reading}
-                onClick={() => choose(demoFile())}
-              >
-                Chưa có file? Thử khối mẫu <ArrowUpRight size={14} />
-              </button>
+              <div className="sample-actions">
+                <button
+                  className="sample curved-sample"
+                  disabled={busy || reading}
+                  onClick={() => choose(cylinderDemoFile())}
+                >
+                  Thử trụ R5 × H12 <ArrowUpRight size={14} />
+                </button>
+                <input
+                  ref={input}
+                  type="file"
+                  accept=".stl"
+                  hidden
+                  onChange={(e) => choose(e.target.files[0])}
+                />
+                <button
+                  className="sample"
+                  disabled={busy || reading}
+                  onClick={() => choose(demoFile())}
+                >
+                  Chưa có file? Thử khối mẫu <ArrowUpRight size={14} />
+                </button>
+              </div>
               <div className="section-title">
                 <SlidersHorizontal size={16} /> Thiết lập chuyển đổi
               </div>
@@ -448,6 +519,60 @@ function App() {
                   công.
                 </p>
               </div>
+              <fieldset className="advanced-settings" disabled={busy}>
+                <legend>Bề mặt cong · nâng cao</legend>
+                <label htmlFor="curve-mode">Chế độ phục dựng</label>
+                <select
+                  id="curve-mode"
+                  value={curveMode}
+                  onChange={(e) => setCurveMode(e.target.value)}
+                >
+                  <option value="auto">
+                    Tự động · giữ mặt gốc nếu không đạt
+                  </option>
+                  <option value="required">Bắt buộc khớp mọi thành phần</option>
+                  <option value="off">Tắt · chỉ gộp mặt phẳng</option>
+                </select>
+                {curveMode !== "off" && (
+                  <>
+                    <div className="fit-controls">
+                      <label htmlFor="fit-tolerance">
+                        Dung sai ({unit})
+                        <input
+                          id="fit-tolerance"
+                          type="number"
+                          min="0.0000001"
+                          step="any"
+                          value={fitTolerance}
+                          onChange={(e) => setFitTolerance(e.target.value)}
+                        />
+                      </label>
+                      <label htmlFor="volume-limit">
+                        Δ thể tích tối đa (%)
+                        <input
+                          id="volume-limit"
+                          type="number"
+                          min="0.000001"
+                          max="5"
+                          step="any"
+                          value={volumeLimit}
+                          onChange={(e) => setVolumeLimit(e.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <p>
+                      Trụ, nón, cầu, xuyến, chi tiết tròn xoay và khối đùn có lỗ
+                      tròn/cung bo. Chưa phục dựng NURBS tự do.
+                    </p>
+                    {curveMode === "required" && (
+                      <p className="strict-note">
+                        Không xuất STEP nếu có thành phần không khớp được, kể cả
+                        khối hộp.
+                      </p>
+                    )}
+                  </>
+                )}
+              </fieldset>
               <button
                 className="primary"
                 disabled={!file || !source || busy || reading}
@@ -586,6 +711,11 @@ function App() {
                   />
                   <Metric label="ĐƠN VỊ NGUỒN" value={report.unit} />
                 </div>
+                <CurveReport
+                  reconstruction={report.curve_reconstruction}
+                  surfaceTypes={report.surface_types}
+                  unit={report.unit}
+                />
                 <div className="report-details">
                   <div>
                     <h3>Lưới trước và sau sửa</h3>
@@ -622,8 +752,10 @@ function App() {
                         : "Chưa xuất STEP. Xem báo cáo để xác định vùng cần sửa."}
                     </p>
                     <p>
-                      Mặt phẳng được gộp khi có thể; mặt cong vẫn gồm các mặt
-                      tam giác. Chưa kiểm tra đầy đủ tự giao của mesh.
+                      {report.curve_reconstruction?.accepted_components > 0
+                        ? "Bề mặt cong đã qua kiểm tra sai lệch hai chiều và giới hạn thể tích. Những thành phần không đạt vẫn giữ mặt gốc trong chế độ tự động."
+                        : "Chưa có thành phần cong được phục dựng đạt yêu cầu; các vùng cong vẫn có thể gồm nhiều mặt tam giác."}{" "}
+                      Chưa kiểm tra đầy đủ tự giao của mesh.
                     </p>
                   </div>
                 </div>

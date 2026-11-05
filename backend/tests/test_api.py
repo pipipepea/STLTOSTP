@@ -89,3 +89,26 @@ def test_queue_failure_returns_service_unavailable(client, monkeypatch):
     h = {'X-API-Key': API_KEY}
     response = client.post('/api/jobs', headers=h, files={'file': ('a.stl', b'abc')})
     assert response.status_code == 503
+
+
+def test_analytic_options_reach_worker_and_step_report(client):
+    mesh = trimesh.creation.cylinder(radius=5, height=12, sections=64)
+    response = client.post('/api/jobs', headers={'X-API-Key': API_KEY},
+                           data={'curve_mode': 'auto', 'fit_tolerance': '.05', 'max_volume_change': '.02'},
+                           files={'file': ('cylinder.stl', mesh.export(file_type='stl'))})
+    assert response.status_code == 202
+    job = response.json()
+    report = client.get(f"/api/jobs/{job['task_id']}/files/report", headers={'X-Job-Token': job['token']}).json()
+    assert report['success']
+    assert report['surface_types'] == {'plane': 2, 'cylinder': 1}
+    assert report['curve_reconstruction']['reimported_step_distances'][0]['max'] <= .05
+
+
+@pytest.mark.parametrize('data', [
+    {'curve_mode': 'unknown'}, {'fit_tolerance': 'nan'}, {'fit_tolerance': 'inf'},
+    {'fit_tolerance': '0'}, {'max_volume_change': '.06'}, {'max_volume_change': 'nan'},
+])
+def test_reject_invalid_curve_options_before_dispatch(client, data):
+    response = client.post('/api/jobs', headers={'X-API-Key': API_KEY}, data=data,
+                           files={'file': ('test.stl', b'abc')})
+    assert response.status_code == 422

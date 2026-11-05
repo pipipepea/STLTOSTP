@@ -1149,3 +1149,193 @@ footer a {
     font-size: 8px;
   }
 }
+.sample-actions {
+  margin: 12px 0 20px;
+}
+.sample-actions .sample {
+  margin: 9px auto;
+}
+.advanced-settings {
+  margin: 18px 19px 0;
+  padding: 13px 12px;
+  border: 1px solid #d6e8e2;
+  border-radius: 6px;
+  background: #f6fbf9;
+  min-width: 0;
+}
+.advanced-settings legend {
+  font-size: 9px;
+  font-weight: 600;
+  color: #287d6b;
+  padding: 0 5px;
+}
+.advanced-settings > label {
+  font-size: 8px;
+  display: block;
+  color: #648279;
+}
+.advanced-settings select {
+  width: 100%;
+  margin: 7px 0 12px;
+  font-size: 8px;
+  padding: 9px 5px;
+}
+.fit-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.fit-controls label {
+  font-size: 8px;
+  color: #648279;
+  line-height: 1.7;
+}
+.fit-controls input {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d3e3de;
+  border-radius: 4px;
+  margin-top: 5px;
+  font-size: 10px;
+  color: #31594f;
+  background: white;
+}
+.advanced-settings p {
+  font-size: 8px;
+  line-height: 1.8;
+  color: #7d988f;
+  margin: 10px 0 0;
+}
+.advanced-settings .strict-note {
+  color: #af693f;
+}
+.curve-report {
+  margin: 0 22px 20px;
+  border: 1px solid #dbe9e4;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.curve-report-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f5faf8;
+  padding: 16px;
+}
+.curve-report-heading h3 {
+  font-size: 11px;
+  color: #307969;
+  margin: 0 0 7px;
+}
+.curve-report-heading p {
+  font-size: 9px;
+  color: #7b978d;
+  margin: 0;
+}
+.surface-badge {
+  font-size: 9px;
+  color: #468273;
+  line-height: 1.8;
+  text-align: right;
+  max-width: 45%;
+}
+.curve-table-scroll {
+  overflow-x: auto;
+}
+.curve-report table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 550px;
+  text-align: left;
+  font-size: 9px;
+}
+.curve-report th {
+  font-weight: 500;
+  font-size: 8px;
+  color: #7e969d;
+  background: #fcfefd;
+}
+.curve-report th,
+.curve-report td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf2f0;
+  vertical-align: top;
+}
+.curve-report td {
+  color: #46666c;
+  line-height: 1.9;
+}
+.curve-report td small {
+  display: block;
+  color: #94a7ad;
+  font-size: 8px;
+  margin-top: 4px;
+}
+.fit-accepted,
+.fit-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.fit-accepted {
+  color: #2d8c72;
+}
+.fit-fallback {
+  color: #b28a50;
+}
+.measurement-note {
+  font-size: 8px;
+  color: #8aa097;
+  line-height: 1.9;
+  padding: 0 15px;
+  margin: 13px 0;
+}
+.fit-reasons {
+  padding: 14px 16px;
+  font-size: 9px;
+  line-height: 1.9;
+  color: #8c7b60;
+}
+.fit-reasons summary {
+  cursor: pointer;
+}
+.fit-reasons > div {
+  margin-top: 12px;
+}
+@media (max-width: 800px) and (min-width: 461px) {
+  .sample-actions {
+    grid-column: 1;
+    grid-row: 7;
+    margin: 6px 0 12px;
+  }
+  .advanced-settings {
+    grid-column: 1/-1;
+    grid-row: 8;
+    margin-bottom: 18px;
+  }
+  .settings .info-box {
+    grid-row: 9;
+  }
+  .settings > .primary {
+    grid-row: 9;
+  }
+  .advanced-settings select {
+    font-size: 10px;
+  }
+}
+@media (max-width: 460px) {
+  .curve-report {
+    margin: 0 14px 16px;
+  }
+  .curve-report-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .surface-badge {
+    max-width: 100%;
+    text-align: left;
+  }
+}

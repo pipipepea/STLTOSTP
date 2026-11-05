@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import math
 import json
 import secrets
 import shutil
@@ -22,7 +23,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title='STL to STP', version='0.1.0', lifespan=lifespan)
+app = FastAPI(title='STL to STP', version='0.2.0', lifespan=lifespan)
 
 
 def require_key(x_api_key: Annotated[str | None, Header()] = None):
@@ -59,9 +60,18 @@ def health():
 @app.post('/api/jobs', status_code=202, dependencies=[Depends(require_key)])
 async def submit(file: Annotated[UploadFile, File()],
                  unit: Annotated[str, Form()] = 'mm',
-                 merge_planes: Annotated[bool, Form()] = True):
+                 merge_planes: Annotated[bool, Form()] = True,
+                 curve_mode: Annotated[str, Form()] = 'off',
+                 fit_tolerance: Annotated[float, Form()] = .05,
+                 max_volume_change: Annotated[float, Form()] = .02):
     if unit not in {'mm', 'cm', 'm', 'inch'}:
         raise HTTPException(422, 'Đơn vị không được hỗ trợ.')
+    if curve_mode not in {'off', 'auto', 'required'}:
+        raise HTTPException(422, 'Chế độ phục dựng không hợp lệ.')
+    if not math.isfinite(fit_tolerance) or fit_tolerance <= 0:
+        raise HTTPException(422, 'Dung sai phải là số hữu hạn lớn hơn 0.')
+    if not math.isfinite(max_volume_change) or not 0 < max_volume_change <= .05:
+        raise HTTPException(422, 'Giới hạn thay đổi thể tích phải lớn hơn 0 và không quá 5%.')
     if not (file.filename or '').lower().endswith('.stl'):
         raise HTTPException(422, 'Chỉ nhận file .stl.')
     job_id = str(uuid4())
@@ -80,8 +90,10 @@ async def submit(file: Annotated[UploadFile, File()],
         token = secrets.token_urlsafe(32)
         update(job_id, 'queued', 0, 'Đang chờ worker', token=token,
                filename=(file.filename or 'source.stl').replace('\\', '/').split('/')[-1][:200],
-               unit=unit, size_bytes=total)
-        convert_job.apply_async(args=[job_id, unit, merge_planes], task_id=job_id, expires=JOB_TIMEOUT)
+               unit=unit, size_bytes=total, curve_mode=curve_mode, fit_tolerance=fit_tolerance,
+               max_volume_change=max_volume_change)
+        convert_job.apply_async(args=[job_id, unit, merge_planes, curve_mode, fit_tolerance, max_volume_change],
+                                task_id=job_id, expires=JOB_TIMEOUT)
     except HTTPException:
         shutil.rmtree(folder, ignore_errors=True)
         raise

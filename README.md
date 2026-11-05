@@ -2,18 +2,35 @@
 
 Công cụ web chuyển STL sang solid B-rep và STEP, có báo cáo lỗi hình học và kiểm tra lại file sau xuất. Repo: `pipipepea/STLTOSTP`.
 
-## Bản đầu làm được gì?
+## Bản 0.2 làm được gì?
 
 - Tải STL ASCII/binary, xem 3D bằng Three.js; parse trong Web Worker.
 - FastAPI nhận file, trả `task_id`; Celery + Redis xử lý nền. Tiến độ qua WebSocket, có polling dự phòng.
 - Phát hiện cạnh hở, cạnh phi đa tạp, mặt trùng, mặt suy biến và ghi tọa độ vùng bao lỗi vào JSON.
 - Chỉ hàn các đỉnh có tọa độ bằng nhau chính xác; loại mặt trùng/suy biến và sửa hướng mặt. Không tự vá lỗ hoặc làm mịn.
 - OCCT dựng shell/solid thật. Tùy chọn gộp mặt đồng phẳng: khối hộp 12 tam giác được chuyển thành 6 mặt B-rep.
+- **Phục dựng bề mặt cong:** cầu, xuyến và biên dạng tròn xoay tạo mặt trụ/nón chuẩn; hỗ trợ ống rỗng, trục bậc và cạnh vát đồng tâm. Khối đùn sâu không đổi có lỗ tròn lệch tâm hoặc đường bao bo tròn có thể dựng lại các mặt trụ cục bộ.
+- Dung sai theo đơn vị nguồn, giới hạn thay đổi thể tích, đo sai lệch hai chiều, kiểm tra topology Euler và giữ các góc của biên dạng tròn xoay. Đếm loại mặt CAD thật sau khi đọc STEP, không chỉ đếm tam giác xem trước.
 - Kiểm tra B-rep, thể tích dương, số solid, kích thước bao; xuất STEP AP214, nhập lại và đối chiếu số solid/thể tích/kích thước.
 - Tải STEP, STL đã sửa và báo cáo JSON. Bản xem đầu ra được tessellate từ STEP đã nhập lại.
 - File bị từ chối truy cập sau 24 giờ; Celery Beat dọn file trong lần chạy hàng giờ kế tiếp (thời gian lưu vật lý có thể tới 25 giờ). Không lưu file người dùng vào Git.
 
-**Phạm vi hình học:** gộp các mặt phẳng; các vùng cong vẫn gồm nhiều mặt phẳng nhỏ. Chưa phục dựng tự động mặt trụ/cầu/NURBS, chưa có AI. Không coi STEP nhiều mặt tam giác là STEP đã tái dựng bề mặt tham số. Mesh self-intersection chưa được kiểm tra đầy đủ; BRepCheck không thay thế mọi kiểm tra tự giao. Chưa chứng nhận dùng trực tiếp cho sản xuất.
+**Phạm vi hình học:** fitting hình học có kiểm chứng, chưa dùng AI. Chỉ thay các thành phần/biên dạng thuộc nhóm được hỗ trợ và đạt dung sai; các vùng còn lại giữ mặt tam giác. Chưa khớp NURBS tự do, mọi fillet/loft hoặc lỗ xiên/độ sâu thay đổi. Sai lệch bề mặt là số đo lấy mẫu, không phải bảo đảm Hausdorff liên tục. Mesh self-intersection chưa được kiểm tra đầy đủ; BRepCheck không thay thế mọi kiểm tra tự giao. Chưa chứng nhận dùng trực tiếp cho sản xuất.
+
+## Dùng phục dựng bề mặt cong
+
+1. Tải STL hoặc nhấn **Thử trụ R5 × H12**. Chọn đúng đơn vị.
+2. Trong **Bề mặt cong · nâng cao**, chọn `Tự động`, nhập dung sai (mặc định `0.05` đơn vị nguồn), giới hạn thay đổi thể tích (mặc định `2%`). Không dùng dung sai lớn để ép nhận dạng; engine từ chối khớp nếu dung sai vượt 1% đường chéo thành phần.
+3. Sau xử lý, xem từng thành phần: đã phục dựng hay giữ mặt gốc, loại bề mặt, sai lệch lấy mẫu hai chiều và Δ thể tích.
+4. Tải STEP và báo cáo JSON. Báo cáo chứa trục, bán kính, biên dạng, lỗ, thử khớp bị từ chối và tọa độ sai lệch lớn nhất.
+
+| Chế độ | Hành vi |
+|---|---|
+| Tự động (`auto`) | Thay thành phần đạt kiểm tra; giữ B-rep faceted cho phần không đạt và báo rõ |
+| Bắt buộc (`required`) | Không xuất STEP nếu bất kỳ thành phần nào không khớp được, kể cả khối hộp thuần phẳng |
+| Tắt (`off`) | Giữ luồng gộp mặt phẳng của bản 0.1 |
+
+Giao diện mặc định `auto`. API mặc định `off` để tương thích client cũ; các trường form mới là `curve_mode`, `fit_tolerance`, `max_volume_change` (tỷ lệ, ví dụ `0.02` là 2%, tối đa `0.05`). Dung sai là đơn vị nguồn, không tự chuyển giá trị khi đổi lựa chọn đơn vị trên giao diện.
 
 ## Chạy trên VPS bằng Docker
 
@@ -82,4 +99,4 @@ API tests chạy conversion thật với OCCT, nhưng thay queue dispatch bằng
 
 ## Kiến trúc và giai đoạn kế tiếp
 
-Xem [docs/architecture.md](docs/architecture.md) và [docs/deployment.md](docs/deployment.md). GPU inference, primitive fitting, MinIO/S3, CAD self-intersection kiểm tra nâng cao và auth nhiều người dùng nằm trong roadmap, chưa là tính năng hoạt động.
+Xem [docs/curved-surfaces.md](docs/curved-surfaces.md), [docs/architecture.md](docs/architecture.md) và [docs/deployment.md](docs/deployment.md). GPU inference, NURBS tự do, MinIO/S3, CAD self-intersection kiểm tra nâng cao và auth nhiều người dùng nằm trong roadmap, chưa là tính năng hoạt động.

@@ -1,4 +1,4 @@
-# Kiến trúc bản 0.1
+# Kiến trúc bản 0.2
 
 ```mermaid
 flowchart TD
@@ -18,7 +18,7 @@ flowchart TD
 | Frontend | React, Three.js, Web Worker, split view, lỗi và download | LOD, chọn từng vùng lỗi, lịch sử job |
 | API | API key, streaming upload, task ID, job capability token, WebSocket | OIDC, quota theo người dùng, giới hạn tổng queue |
 | Điều phối | Celery prefork, Redis, một task/process, timeout, Beat cleanup | Queue CPU/GPU riêng, retry có kiểm soát |
-| Geometry | trimesh + NumPy, OCCT qua cadquery-ocp | Region growing, fitting trụ/cầu/nón, giao tuyến, NURBS |
+| Geometry | trimesh + NumPy + R-tree, OCCT qua cadquery-ocp; fitting cầu/xuyến/tròn xoay/khối đùn có cung tròn | Region growing tùy ý, giao tuyến/trim cục bộ, NURBS tự do |
 | Lưu trữ | Docker volume chung một VPS, TTL logic + dọn hàng giờ | S3/MinIO, presigned upload, object lifecycle |
 | AI | Chưa tích hợp | Adapter model riêng; chỉ bật sau benchmark hình học |
 
@@ -31,9 +31,9 @@ OCCT qua `cadquery-ocp` được dùng trực tiếp thay vì cài đồng thờ
 3. Chẩn đoán cạnh hở/phi đa tạp, mặt suy biến/trùng, hướng mặt. Báo cáo mỗi loại có vùng bao XYZ; index chi tiết bị giới hạn 5.000 phần tử để tránh báo cáo khổng lồ. Chưa gom các lỗi kề nhau thành từng vùng riêng.
 4. Loại mặt suy biến với ngưỡng rất nhỏ tương đối theo kích thước, bỏ mặt trùng, sửa hướng nhất quán. Giữ STL gốc. Không hàn đỉnh gần nhau, vá lỗ hay tái chia lưới.
 5. Chỉ nhận lưới kín và hướng mặt nhất quán. Tách thành phần **không bật sửa lỗ ngầm**. Từ chối thành phần có vùng bao giao nhau để tránh đoán sai cavity/assembly.
-6. Dựng các mặt tam giác, sewing theo dung sai `max(1e-7, diagonal*1e-9)` trong đơn vị nguồn, tạo solid.
-7. Tùy chọn `ShapeUpgrade_UnifySameDomain`: gộp mặt đồng phẳng với dung sai góc rất nhỏ. Không biến dãy mặt bên của trụ thành cylinder.
-8. BRepCheck, thể tích dương, số solid, bounds; xuất AP214 rồi nhập lại. Sai lệch thể tích tương đối tối đa `1e-5`, bounds tối đa 20 lần dung sai sewing. Các chỉ số này chưa thay thế sai lệch bề mặt hai chiều.
+6. Khi bật `curve_mode`, thử các ứng viên giải tích theo [curved-surfaces.md](curved-surfaces.md), kiểm tra sai lệch lấy mẫu hai chiều/topology/thể tích. Thành phần không được nhận sẽ đi nhánh faceted trong `auto`; `required` dừng và không xuất STEP.
+7. Nhánh faceted dựng các mặt tam giác, sewing theo dung sai `max(1e-7, diagonal*1e-9)` trong đơn vị nguồn, tạo solid. Tùy chọn `ShapeUpgrade_UnifySameDomain` gộp mặt đồng phẳng; bản thân phép gộp này không khớp mặt trụ.
+8. BRepCheck, thể tích dương, số solid, bounds; xuất AP214 rồi nhập lại. Nhánh faceted yêu cầu sai lệch thể tích với mesh tối đa `1e-5`, bounds tối đa 20 lần dung sai sewing. Nhánh phục dựng cong dùng giới hạn người dùng cho thay đổi so với mesh, nhưng round-trip CAD → STEP vẫn yêu cầu `1e-5` và 20 lần dung sai sewing. Đếm loại mặt thật sau nhập lại; với thành phần đã phục dựng, đo bổ sung điểm nguồn tới shell STEP.
 9. Tessellate STEP đã nhập lại để xem trên web. Đây là dữ liệu hiển thị; file tải về vẫn là STEP B-rep thật.
 
 ## Trạng thái và lỗi

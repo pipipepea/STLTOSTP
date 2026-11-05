@@ -108,7 +108,8 @@ def shape_metrics(shape):
             'volume': float(prop.Mass()), 'bounds': [list(b[:3]), list(b[3:])]}
 
 
-def build_shape(mesh, tolerance, merge_planes):
+def build_shape(mesh, tolerance, merge_planes, *, curve_mode='off', fit_tolerance=.05,
+                max_volume_change=.02, curve_components=None):
     from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace,
                                     BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid)
     from OCP.BRep import BRep_Builder
@@ -128,9 +129,22 @@ def build_shape(mesh, tolerance, merge_planes):
     compound = TopoDS_Compound()
     builder = BRep_Builder()
     builder.MakeCompound(compound)
-    for part in components:
+    for part_id, part in enumerate(components):
         if not part.is_watertight or not part.is_winding_consistent:
             raise ValueError('Lưới còn hở hoặc phi đa tạp. Xem vị trí lỗi trong báo cáo; hệ thống không tự lấp lỗ.')
+        if curve_mode != 'off':
+            from .surfaces import reconstruct, surface_types
+            fitted, detail = reconstruct(part, fit_tolerance, max_volume_change)
+            detail.update(component=part_id, source_faces=len(part.faces), bounds=part.bounds.tolist())
+            if fitted is not None:
+                detail['surface_types'] = surface_types(fitted)
+            if curve_components is not None:
+                curve_components.append(detail)
+            if fitted is not None:
+                builder.Add(compound, fitted)
+                continue
+            if curve_mode == 'required':
+                raise ValueError(f'Thành phần {part_id}: không khớp được bề mặt cong trong dung sai. Xem báo cáo thử khớp.')
         sewing = BRepBuilderAPI_Sewing(tolerance)
         for triangle in part.triangles:
             polygon = BRepBuilderAPI_MakePolygon()
@@ -162,7 +176,7 @@ def export_preview(shape, path, tolerance):
     from OCP.TopoDS import TopoDS
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
-    BRepMesh_IncrementalMesh(shape, max(tolerance, 0.01), False, 0.2, False).Perform()
+    BRepMesh_IncrementalMesh(shape, max(tolerance, 1e-7), False, 0.2, False).Perform()
     triangles = []
     for item in subshapes(shape, TopAbs_FACE):
         face = TopoDS.Face_s(item)
@@ -181,18 +195,26 @@ def export_preview(shape, path, tolerance):
     preview.export(path, file_type='stl')
 
 
-def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progress=lambda *x: None):
+def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progress=lambda *x: None,
+            *, curve_mode='off', fit_tolerance=.05, max_volume_change=.02):
     from OCP.STEPControl import STEPControl_Writer, STEPControl_Reader, STEPControl_AsIs
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.Interface import Interface_Static
     import OCP
     report = {'engine': f'OCCT {OCP.__version__}', 'unit': unit,
               'mode': 'planar_merge' if merge_planes else 'faceted', 'success': False,
-              'limitations': ['Không khớp tự động mặt trụ/cầu/NURBS; không dùng AI trong bản này.',
+              'limitations': ['Phục dựng cầu, xuyến, biên dạng tròn xoay và khối đùn sâu không đổi với cung tròn/lỗ tròn; chưa khớp NURBS tự do hay mọi mảnh cong tùy ý.',
                               'Không tự vá lỗ, làm mịn hoặc thay đổi tỷ lệ.',
+                              'Sai lệch bề mặt được đo bằng lấy mẫu, không phải bảo đảm Hausdorff liên tục.',
                               'Tự giao của mesh chưa được kiểm tra đầy đủ; CAD được kiểm tra BRepCheck.']}
     step = output_dir / 'result.step'
     try:
+        if curve_mode not in {'off', 'auto', 'required'}:
+            raise ValueError('Chế độ phục dựng bề mặt không hợp lệ.')
+        if not np.isfinite(fit_tolerance) or fit_tolerance <= 0:
+            raise ValueError('Dung sai bề mặt phải là số hữu hạn lớn hơn 0.')
+        if not np.isfinite(max_volume_change) or not 0 < max_volume_change <= .05:
+            raise ValueError('Giới hạn thay đổi thể tích phải lớn hơn 0 và không quá 5%.')
         progress(15, 'Đang phân tích lưới và định vị lỗi')
         mesh = load_mesh(source)
         report['before'] = diagnose(mesh)
@@ -202,14 +224,24 @@ def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progre
         fixed.export(output_dir / 'repaired.stl')
         tolerance = max(1e-7, mesh.scale * 1e-9)
         report['sewing_tolerance'] = tolerance
-        progress(40, 'Đang khâu shell và dựng solid CAD')
-        shape, components = build_shape(fixed, tolerance, merge_planes)
+        progress(40, 'Đang khớp bề mặt cong và đo sai lệch' if curve_mode != 'off' else 'Đang khâu shell và dựng solid CAD')
+        curve_components = []
+        report['curve_reconstruction'] = {'mode': curve_mode, 'fit_tolerance': fit_tolerance,
+                                           'max_volume_change': max_volume_change,
+                                           'components': curve_components}
+        shape, components = build_shape(fixed, tolerance, merge_planes, curve_mode=curve_mode,
+                                         fit_tolerance=fit_tolerance, max_volume_change=max_volume_change,
+                                         curve_components=curve_components)
+        reconstructed = sum(bool(c['accepted']) for c in curve_components)
+        report['curve_reconstruction']['accepted_components'] = reconstructed
         before = shape_metrics(shape)
         bound_error = float(np.max(np.abs(np.asarray(before['bounds']) - fixed.bounds)))
         volume_error = abs(before['volume'] - abs(fixed.volume)) / max(abs(fixed.volume), 1e-30)
         if not before['valid'] or before['solids'] != components or before['volume'] <= 0:
             raise ValueError('Solid CAD không đạt kiểm tra hợp lệ/thể tích/số thành phần.')
-        if bound_error > tolerance * 20 or volume_error > 1e-5:
+        bound_limit = fit_tolerance if reconstructed else tolerance*20
+        volume_limit = max_volume_change if reconstructed else 1e-5
+        if bound_error > bound_limit or volume_error > volume_limit:
             raise ValueError('Sai lệch kích thước hoặc thể tích sau dựng CAD vượt giới hạn.')
         progress(75, 'Đang xuất STEP và nhập lại để xác minh')
         STEPControl_Writer()  # Initialize OCCT's STEP parameter registry.
@@ -231,17 +263,28 @@ def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progre
         reader.TransferRoots()
         reimported = reader.OneShape()
         after = shape_metrics(reimported)
+        from .surfaces import surface_types
+        report['surface_types'] = surface_types(reimported)
+        if report['surface_types'] != surface_types(shape):
+            raise ValueError('Loại bề mặt thay đổi sau khi nhập lại STEP.')
         if not after['valid'] or after['solids'] != components or after['volume'] <= 0:
             raise ValueError('STEP sau nhập lại không còn là solid hợp lệ.')
         if np.max(np.abs(np.asarray(after['bounds']) - np.asarray(before['bounds']))) > tolerance * 20:
             raise ValueError('Kích thước STEP sau nhập lại vượt dung sai.')
         if abs(after['volume'] - before['volume']) / before['volume'] > 1e-5:
             raise ValueError('Thể tích STEP sau nhập lại vượt dung sai.')
+        if reconstructed:
+            from .surfaces import verify_step_distances
+            report['curve_reconstruction']['reimported_step_distances'] = verify_step_distances(
+                fixed, reimported, curve_components, fit_tolerance)
         report['verification'] = {'before_export': before, 'after_reimport': after,
                                   'bounds_max_error': bound_error, 'relative_volume_error': volume_error,
-                                  'surface_deviation': 'not_sampled; only coplanar faces are merged'}
-        report['output_geometry'] = 'planar_brep; curved surfaces remain faceted'
-        export_preview(reimported, output_dir / 'preview.stl', tolerance)
+                                  'bounds_limit': bound_limit, 'relative_volume_limit': volume_limit,
+                                  'surface_deviation': 'see curve_reconstruction.components; sampled bidirectional checks' if reconstructed else 'not_sampled; only coplanar faces are merged'}
+        report['output_geometry'] = ('analytic_curved_brep_with_possible_faceted_components' if reconstructed
+                                      else 'planar_brep; curved surfaces remain faceted')
+        report['mode'] = 'analytic_curves' if reconstructed else report['mode']
+        export_preview(reimported, output_dir / 'preview.stl', min(.01, fit_tolerance*.2) if reconstructed else tolerance)
         report['success'] = True
     except Exception as exc:
         step.unlink(missing_ok=True)
