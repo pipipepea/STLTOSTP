@@ -1,0 +1,61 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+  api:
+    build: ./backend
+    environment: &app-env
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-30}
+      MAX_FACES: ${MAX_FACES:-30000}
+      RETENTION_HOURS: ${RETENTION_HOURS:-24}
+      JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-900}
+    volumes:
+      - job-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 768m
+  worker:
+    build: ./backend
+    command: python -m celery -A app.tasks.celery worker --loglevel=INFO --concurrency=1 --max-tasks-per-child=5
+    environment: *app-env
+    volumes:
+      - job-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 4g
+    cpus: 2
+  scheduler:
+    build: ./backend
+    command: python -m celery -A app.tasks.celery beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    environment: *app-env
+    volumes:
+      - job-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  web:
+    build: ./frontend
+    ports:
+      - 127.0.0.1:${HTTP_PORT:-8080}:80
+    depends_on:
+      - api
+    restart: unless-stopped
+volumes:
+  job-data:
+  redis-data:
