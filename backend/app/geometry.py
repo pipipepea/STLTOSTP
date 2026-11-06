@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import numpy as np
 import trimesh
-from .config import MAX_FACES
+from .config import MAX_FACES, MAX_INPUT_FACES
 
 
 def region(points):
@@ -46,8 +46,8 @@ def load_mesh(path):
     mesh = trimesh.load(path, file_type='stl', force='mesh', process=False)
     if not isinstance(mesh, trimesh.Trimesh) or not len(mesh.faces):
         raise ValueError('STL không chứa tam giác hợp lệ.')
-    if len(mesh.faces) > MAX_FACES:
-        raise ValueError(f'Lưới có {len(mesh.faces)} mặt; giới hạn bản đầu là {MAX_FACES}.')
+    if len(mesh.faces) > MAX_INPUT_FACES:
+        raise ValueError(f'Lưới có {len(mesh.faces)} mặt; giới hạn đọc STL là {MAX_INPUT_FACES}.')
     if not np.isfinite(mesh.vertices).all():
         raise ValueError('Tọa độ STL có NaN hoặc giá trị vô hạn.')
     # Merge ONLY bitwise-equal coordinates; no arbitrary geometric welding.
@@ -196,7 +196,8 @@ def export_preview(shape, path, tolerance):
 
 
 def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progress=lambda *x: None,
-            *, curve_mode='off', fit_tolerance=.05, max_volume_change=.02):
+            *, curve_mode='off', fit_tolerance=.05, max_volume_change=.02,
+            simplify_mesh=False, target_faces=None, simplify_tolerance=.05):
     from OCP.STEPControl import STEPControl_Writer, STEPControl_Reader, STEPControl_AsIs
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.Interface import Interface_Static
@@ -209,6 +210,11 @@ def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progre
                               'Tự giao của mesh chưa được kiểm tra đầy đủ; CAD được kiểm tra BRepCheck.']}
     step = output_dir / 'result.step'
     try:
+        target_faces = min(25000, MAX_FACES) if target_faces is None else target_faces
+        if isinstance(target_faces, bool) or not isinstance(target_faces, int) or not 4 <= target_faces <= MAX_FACES:
+            raise ValueError(f'Số mặt đích phải là số nguyên từ 4 đến {MAX_FACES}.')
+        if not np.isfinite(simplify_tolerance) or simplify_tolerance <= 0:
+            raise ValueError('Dung sai giảm lưới phải là số hữu hạn lớn hơn 0.')
         if curve_mode not in {'off', 'auto', 'required'}:
             raise ValueError('Chế độ phục dựng bề mặt không hợp lệ.')
         if not np.isfinite(fit_tolerance) or fit_tolerance <= 0:
@@ -222,12 +228,24 @@ def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progre
         report['repairs'] = changes
         report['after'] = diagnose(fixed)
         fixed.export(output_dir / 'repaired.stl')
+        reference = fixed
+        reduction = report['simplification'] = {'requested': simplify_mesh, 'applied': False}
+        if simplify_mesh:
+            from .simplification import simplify
+            progress(25, 'Đang giảm lưới và kiểm tra sai lệch, topology, cạnh sắc')
+            fixed = simplify(reference, target_faces, simplify_tolerance, reduction)
+            if reduction['applied']:
+                fixed.export(output_dir / 'simplified.stl')
+        if len(fixed.faces) > MAX_FACES:
+            raise ValueError(f'Lưới có {len(fixed.faces)} mặt; giới hạn dựng CAD là {MAX_FACES}. Bật Giảm lưới trước chuyển đổi để tiếp tục.')
+        report['conversion_mesh'] = diagnose(fixed)
         tolerance = max(1e-7, mesh.scale * 1e-9)
         report['sewing_tolerance'] = tolerance
         progress(40, 'Đang khớp bề mặt cong và đo sai lệch' if curve_mode != 'off' else 'Đang khâu shell và dựng solid CAD')
         curve_components = []
         report['curve_reconstruction'] = {'mode': curve_mode, 'fit_tolerance': fit_tolerance,
                                            'max_volume_change': max_volume_change,
+                                           'reference_mesh': 'simplified' if reduction['applied'] else 'repaired_original',
                                            'components': curve_components}
         shape, components = build_shape(fixed, tolerance, merge_planes, curve_mode=curve_mode,
                                          fit_tolerance=fit_tolerance, max_volume_change=max_volume_change,
@@ -284,11 +302,32 @@ def convert(source: Path, output_dir: Path, unit='mm', merge_planes=True, progre
         report['output_geometry'] = ('analytic_curved_brep_with_possible_faceted_components' if reconstructed
                                       else 'planar_brep; curved surfaces remain faceted')
         report['mode'] = 'analytic_curves' if reconstructed else report['mode']
-        export_preview(reimported, output_dir / 'preview.stl', min(.01, fit_tolerance*.2) if reconstructed else tolerance)
+        preview_tolerance = min(.01, fit_tolerance*.2) if reconstructed else tolerance
+        export_preview(reimported, output_dir / 'preview.stl', preview_tolerance)
+        if reduction['applied']:
+            # Validate the combined reduction + CAD fitting path against the
+            # repaired original, so error from the two stages is not hidden.
+            from .simplification import compare_meshes
+            preview = trimesh.load(
+                output_dir / 'preview.stl', file_type='stl', force='mesh', process=False)
+            budget = simplify_tolerance+(fit_tolerance if reconstructed else tolerance*20)
+            check = compare_meshes(reference, preview, budget+max(preview_tolerance, 1e-7))
+            check['reduction_and_fit_budget'] = budget
+            check['preview_deflection_budget'] = max(preview_tolerance, 1e-7)
+            check['measurement'] = 'original_repaired_mesh_vs_reimported_STEP_tessellation_samples'
+            report['verification']['original_surface_deviation'] = check
+            combined_volume_limit = (1.01*(1+max_volume_change)-1) if reconstructed else .01002
+            original_volume_change = abs(before['volume']-abs(reference.volume))/max(abs(reference.volume), 1e-30)
+            report['verification']['original_relative_volume_change'] = float(original_volume_change)
+            report['verification']['original_relative_volume_limit'] = combined_volume_limit
+            if not check['passed'] or original_volume_change > combined_volume_limit:
+                raise ValueError('Tổng sai lệch STEP so với lưới gốc sau giảm lưới và phục dựng vượt giới hạn.')
         report['success'] = True
     except Exception as exc:
         step.unlink(missing_ok=True)
         report['error'] = str(exc)
+        if report.get('simplification', {}).get('requested') and not report['simplification'].get('accepted'):
+            report['simplification']['rejection_reason'] = str(exc)
     finally:
         (output_dir / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
     return report

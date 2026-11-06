@@ -112,3 +112,38 @@ def test_reject_invalid_curve_options_before_dispatch(client, data):
     response = client.post('/api/jobs', headers={'X-API-Key': API_KEY}, data=data,
                            files={'file': ('test.stl', b'abc')})
     assert response.status_code == 422
+
+
+def test_simplification_options_download_and_original_comparison(client):
+    mesh = trimesh.creation.box(extents=[10, 12, 15]).subdivide().subdivide().subdivide()
+    response = client.post('/api/jobs', headers={'X-API-Key': API_KEY},
+                           data={'simplify_mesh': 'true', 'target_faces': '300', 'simplify_tolerance': '.05'},
+                           files={'file': ('dense.stl', mesh.export(file_type='stl'))})
+    assert response.status_code == 202
+    job = response.json()
+    url = f"/api/jobs/{job['task_id']}"
+    headers = {'X-Job-Token': job['token']}
+    report = client.get(url+'/files/report', headers=headers).json()
+    assert report['success'], report
+    assert report['simplification']['applied'] and report['simplification']['accepted']
+    assert report['conversion_mesh']['faces'] <= 300
+    assert report['verification']['original_surface_deviation']['passed']
+    assert client.get(url+'/files/simplified', headers=headers).status_code == 200
+    assert client.get(url+'/files/simplified').status_code == 404
+
+
+@pytest.mark.parametrize('data', [
+    {'target_faces': '3'}, {'target_faces': '30001'}, {'target_faces': '20.5'},
+    {'simplify_tolerance': 'nan'}, {'simplify_tolerance': 'inf'}, {'simplify_tolerance': '0'},
+])
+def test_invalid_simplification_settings_are_rejected(client, data):
+    response = client.post('/api/jobs', headers={'X-API-Key': API_KEY}, data=data,
+                           files={'file': ('test.stl', b'abc')})
+    assert response.status_code == 422
+
+
+def test_public_config_exposes_actual_face_and_upload_limits(client):
+    settings = client.get('/api/config').json()
+    assert settings['max_input_faces'] >= settings['max_cad_faces']
+    assert 4 <= settings['default_target_faces'] <= settings['max_cad_faces']
+    assert settings['max_upload_bytes'] > 0

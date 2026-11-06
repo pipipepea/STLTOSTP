@@ -1,4 +1,4 @@
-# Kiến trúc bản 0.2
+# Kiến trúc bản 0.3
 
 ```mermaid
 flowchart TD
@@ -29,12 +29,12 @@ OCCT qua `cadquery-ocp` được dùng trực tiếp thay vì cài đồng thờ
 1. Nạp STL không xử lý ngầm; kiểm tra số mặt, giá trị hữu hạn và scale.
 2. Hợp nhất đỉnh trùng chính xác để STL có topology cạnh. Báo cáo trước sửa dùng index của lưới đã hợp nhất này, không phải index byte trong STL.
 3. Chẩn đoán cạnh hở/phi đa tạp, mặt suy biến/trùng, hướng mặt. Báo cáo mỗi loại có vùng bao XYZ; index chi tiết bị giới hạn 5.000 phần tử để tránh báo cáo khổng lồ. Chưa gom các lỗi kề nhau thành từng vùng riêng.
-4. Loại mặt suy biến với ngưỡng rất nhỏ tương đối theo kích thước, bỏ mặt trùng, sửa hướng nhất quán. Giữ STL gốc. Không hàn đỉnh gần nhau, vá lỗ hay tái chia lưới.
+4. Loại mặt suy biến với ngưỡng rất nhỏ tương đối theo kích thước, bỏ mặt trùng, sửa hướng nhất quán. Giữ STL gốc. Không hàn đỉnh gần nhau hoặc vá lỗ. Khi bật `simplify_mesh`, chạy QuadricDecimation, kiểm tra độc lập topology/Euler, độ kín, thể tích, cạnh sắc và bề mặt lấy mẫu; chỉ dùng STL giảm khi đạt. Không tự giảm khi chưa được bật. Giới hạn đọc STL và giới hạn dựng CAD tách riêng.
 5. Chỉ nhận lưới kín và hướng mặt nhất quán. Tách thành phần **không bật sửa lỗ ngầm**. Từ chối thành phần có vùng bao giao nhau để tránh đoán sai cavity/assembly.
 6. Khi bật `curve_mode`, thử các ứng viên giải tích theo [curved-surfaces.md](curved-surfaces.md), kiểm tra sai lệch lấy mẫu hai chiều/topology/thể tích. Thành phần không được nhận sẽ đi nhánh faceted trong `auto`; `required` dừng và không xuất STEP.
 7. Nhánh faceted dựng các mặt tam giác, sewing theo dung sai `max(1e-7, diagonal*1e-9)` trong đơn vị nguồn, tạo solid. Tùy chọn `ShapeUpgrade_UnifySameDomain` gộp mặt đồng phẳng; bản thân phép gộp này không khớp mặt trụ.
 8. BRepCheck, thể tích dương, số solid, bounds; xuất AP214 rồi nhập lại. Nhánh faceted yêu cầu sai lệch thể tích với mesh tối đa `1e-5`, bounds tối đa 20 lần dung sai sewing. Nhánh phục dựng cong dùng giới hạn người dùng cho thay đổi so với mesh, nhưng round-trip CAD → STEP vẫn yêu cầu `1e-5` và 20 lần dung sai sewing. Đếm loại mặt thật sau nhập lại; với thành phần đã phục dựng, đo bổ sung điểm nguồn tới shell STEP.
-9. Tessellate STEP đã nhập lại để xem trên web. Đây là dữ liệu hiển thị; file tải về vẫn là STEP B-rep thật.
+9. Tessellate STEP đã nhập lại để xem trên web. Nếu đã giảm lưới, đo bổ sung hai chiều giữa tessellation STEP và lưới gốc đã sửa, theo ngân sách giảm + khớp + deflection, và đối chiếu lại thể tích gốc. Đây là số đo lấy mẫu, không phải Hausdorff chứng nhận. File tải về vẫn là STEP B-rep thật.
 
 ## Trạng thái và lỗi
 

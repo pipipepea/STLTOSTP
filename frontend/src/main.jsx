@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Viewer from "./Viewer";
 import CurveReport from "./CurveReport";
+import SimplificationReport from "./SimplificationReport";
 import "./style.css";
 
 const EMPTY = [];
@@ -143,6 +144,39 @@ function App() {
   const [curveMode, setCurveMode] = useState("auto");
   const [fitTolerance, setFitTolerance] = useState("0.05");
   const [volumeLimit, setVolumeLimit] = useState("2");
+  const [simplifyMesh, setSimplifyMesh] = useState(false);
+  const [targetFaces, setTargetFaces] = useState("25000");
+  const [simplifyTolerance, setSimplifyTolerance] = useState("0.05");
+  const [limits, setLimits] = useState({
+    max_input_faces: 200000,
+    max_cad_faces: 30000,
+    max_upload_bytes: 30 * 1024 * 1024,
+  });
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/config", { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((value) => {
+        if (
+          value &&
+          ["max_input_faces", "max_cad_faces", "max_upload_bytes"].every(
+            (k) => Number.isFinite(value[k]) && value[k] > 0,
+          )
+        ) {
+          setLimits(value);
+          setTargetFaces((previous) =>
+            previous === "25000"
+              ? String(
+                  value.default_target_faces ||
+                    Math.min(25000, value.max_cad_faces),
+                )
+              : previous,
+          );
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [busy, setBusy] = useState(false),
     [reading, setReading] = useState(false),
     [job, setJob] = useState(null),
@@ -165,8 +199,10 @@ function App() {
       setError("Vui lòng chọn file STL.");
       return;
     }
-    if (f.size > 30 * 1024 * 1024) {
-      setError("Giới hạn tải lên là 30 MB.");
+    if (f.size > limits.max_upload_bytes) {
+      setError(
+        `Giới hạn tải lên là ${Math.floor(limits.max_upload_bytes / 1024 / 1024)} MB.`,
+      );
       return;
     }
     setReading(true);
@@ -178,6 +214,10 @@ function App() {
     setFile(f);
     try {
       const data = await parseSTL(await f.arrayBuffer());
+      if (data.positions.length / 9 > limits.max_input_faces)
+        throw new Error(
+          `Lưới vượt giới hạn đọc ${limits.max_input_faces.toLocaleString("vi-VN")} mặt.`,
+        );
       if (current === selection.current) setSource(data);
     } catch (e) {
       if (current === selection.current) {
@@ -189,6 +229,19 @@ function App() {
     }
   }
   async function start() {
+    if (
+      simplifyMesh &&
+      (!Number.isInteger(Number(targetFaces)) ||
+        Number(targetFaces) < 4 ||
+        Number(targetFaces) > limits.max_cad_faces ||
+        !Number.isFinite(Number(simplifyTolerance)) ||
+        Number(simplifyTolerance) <= 0)
+    ) {
+      setError(
+        `Số mặt đích phải là số nguyên từ 4 đến ${limits.max_cad_faces}; dung sai giảm lưới phải lớn hơn 0.`,
+      );
+      return;
+    }
     if (
       curveMode !== "off" &&
       (!Number.isFinite(Number(fitTolerance)) ||
@@ -221,6 +274,11 @@ function App() {
       form.append("unit", unit);
       form.append("merge_planes", String(merge));
       form.append("curve_mode", curveMode);
+      form.append("simplify_mesh", String(simplifyMesh));
+      if (simplifyMesh) {
+        form.append("target_faces", targetFaces);
+        form.append("simplify_tolerance", simplifyTolerance);
+      }
       form.append("fit_tolerance", curveMode === "off" ? "0.05" : fitTolerance);
       form.append(
         "max_volume_change",
@@ -326,7 +384,9 @@ function App() {
           ? "result.step"
           : kind === "report"
             ? "report.json"
-            : "repaired.stl";
+            : kind === "simplified"
+              ? "simplified.stl"
+              : "repaired.stl";
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
@@ -399,7 +459,7 @@ function App() {
               </p>
             </div>
             <div className="version">
-              ANALYTIC SURFACES <b>v0.2</b>
+              MESH & SURFACES <b>v0.3</b>
             </div>
           </div>
           <div className="workflow">
@@ -454,7 +514,10 @@ function App() {
                     ? (file.size / 1024).toFixed(1) + " KB · Nhấn để đổi file"
                     : "hoặc nhấn để chọn từ thiết bị"}
                 </span>
-                <small>.STL · Tối đa 30 MB / 30.000 mặt</small>
+                <small>
+                  .STL · {Math.floor(limits.max_upload_bytes / 1024 / 1024)} MB
+                  / {limits.max_input_faces.toLocaleString("vi-VN")} mặt nguồn
+                </small>
               </button>
               <div className="sample-actions">
                 <button
@@ -570,6 +633,66 @@ function App() {
                         khối hộp.
                       </p>
                     )}
+                  </>
+                )}
+              </fieldset>
+              <fieldset
+                className="advanced-settings simplification-settings"
+                disabled={busy}
+              >
+                <legend>Giảm lưới · tùy chọn</legend>
+                <label className="simplify-toggle">
+                  <input
+                    type="checkbox"
+                    checked={simplifyMesh}
+                    onChange={(e) => setSimplifyMesh(e.target.checked)}
+                  />{" "}
+                  Giảm lưới trước chuyển đổi
+                </label>
+                {source &&
+                  source.positions.length / 9 > limits.max_cad_faces &&
+                  !simplifyMesh && (
+                    <p className="strict-note">
+                      Lưới có{" "}
+                      {(source.positions.length / 9).toLocaleString("vi-VN")}{" "}
+                      mặt, vượt giới hạn CAD{" "}
+                      {limits.max_cad_faces.toLocaleString("vi-VN")}. Bật giảm
+                      lưới để tiếp tục.
+                    </p>
+                  )}
+                {simplifyMesh && (
+                  <>
+                    <div className="fit-controls">
+                      <label htmlFor="target-faces">
+                        Số mặt đích
+                        <input
+                          id="target-faces"
+                          type="number"
+                          min="4"
+                          max={limits.max_cad_faces}
+                          step="1"
+                          value={targetFaces}
+                          onChange={(e) => setTargetFaces(e.target.value)}
+                        />
+                      </label>
+                      <label htmlFor="simplify-tolerance">
+                        Dung sai ({unit})
+                        <input
+                          id="simplify-tolerance"
+                          type="number"
+                          min="0.0000001"
+                          step="any"
+                          value={simplifyTolerance}
+                          onChange={(e) => setSimplifyTolerance(e.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <p>
+                      Giữ file gốc. Chỉ nhận kết quả đạt kiểm tra độ kín,
+                      topology, cạnh sắc và sai lệch lấy mẫu; thể tích thay đổi
+                      tối đa 1%. Giảm lưới có thể làm mất chi tiết dưới dung
+                      sai.
+                    </p>
                   </>
                 )}
               </fieldset>
@@ -716,6 +839,11 @@ function App() {
                   surfaceTypes={report.surface_types}
                   unit={report.unit}
                 />
+                <SimplificationReport
+                  info={report.simplification}
+                  verification={report.verification}
+                  unit={report.unit}
+                />
                 <div className="report-details">
                   <div>
                     <h3>Lưới trước và sau sửa</h3>
@@ -782,6 +910,15 @@ function App() {
                       <Download size={16} /> STL đã sửa
                     </button>
                   )}
+                  {report.simplification?.applied &&
+                    report.simplification?.accepted && (
+                      <button
+                        className="secondary"
+                        onClick={() => download("simplified")}
+                      >
+                        <Download size={16} /> STL đã giảm lưới
+                      </button>
+                    )}
                 </div>
               </>
             ) : (

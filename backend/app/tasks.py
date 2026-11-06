@@ -14,7 +14,8 @@ celery.conf.update(task_track_started=True, worker_prefetch_multiplier=1,
 
 
 @celery.task(name='convert_job')
-def convert_job(job_id, unit, merge_planes, curve_mode='off', fit_tolerance=.05, max_volume_change=.02):
+def convert_job(job_id, unit, merge_planes, curve_mode='off', fit_tolerance=.05, max_volume_change=.02,
+                simplify_mesh=False, target_faces=None, simplify_tolerance=.05):
     from .geometry import convert
     if status(job_id) is None:
         return
@@ -22,7 +23,9 @@ def convert_job(job_id, unit, merge_planes, curve_mode='off', fit_tolerance=.05,
     try:
         report = convert(directory(job_id) / 'source.stl', directory(job_id), unit, merge_planes,
                          lambda p, m: update(job_id, 'running', p, m), curve_mode=curve_mode,
-                         fit_tolerance=fit_tolerance, max_volume_change=max_volume_change)
+                         fit_tolerance=fit_tolerance, max_volume_change=max_volume_change,
+                         simplify_mesh=simplify_mesh, target_faces=target_faces,
+                         simplify_tolerance=simplify_tolerance)
         update(job_id, 'completed' if report['success'] else 'failed', 100,
                'Đã xác minh STEP' if report['success'] else report.get('error', 'Chuyển đổi thất bại'))
     except Exception:

@@ -1339,3 +1339,45 @@ footer a {
     text-align: left;
   }
 }
+.simplify-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  line-height: 1.8;
+  margin-bottom: 10px;
+}
+.simplify-toggle input {
+  accent-color: #167c72;
+}
+.simplification-report {
+  margin: 0 22px 20px;
+  border: 1px solid #dbe9e4;
+  border-radius: 6px;
+  background: #f7fbfa;
+  padding: 16px;
+}
+.simplification-report h3 {
+  font-size: 11px;
+  color: #307969;
+  margin: 0 0 10px;
+}
+.simplification-report p {
+  font-size: 9px;
+  line-height: 1.9;
+  color: #5b7d75;
+  margin: 8px 0;
+}
+.simplification-report small {
+  font-size: 8px;
+  line-height: 1.9;
+  color: #8aa097;
+}
+@media (max-width: 800px) and (min-width: 461px) {
+  .settings .simplification-settings {
+    grid-row: 9;
+  }
+  .settings .info-box,
+  .settings > .primary {
+    grid-row: 10;
+  }
+}

@@ -15,6 +15,8 @@ with httpx.Client(base_url=base, timeout=30, trust_env=False) as client:
         ('cylinder', trimesh.creation.cylinder(radius=5, height=12, sections=64),
          {'curve_mode': 'auto', 'fit_tolerance': '.05', 'max_volume_change': '.02'},
          {'plane': 2, 'cylinder': 1}),
+        ('reduced-box', trimesh.creation.box(extents=[10, 12, 15]).subdivide().subdivide().subdivide(),
+         {'simplify_mesh': 'true', 'target_faces': '300', 'simplify_tolerance': '.05'}, {'plane': 6}),
     ]:
         response = client.post('/api/jobs', headers={'X-API-Key': key}, data=options,
                                files={'file': (name+'.stl', mesh.export(file_type='stl'))})
@@ -40,6 +42,12 @@ with httpx.Client(base_url=base, timeout=30, trust_env=False) as client:
             assert b'CYLINDRICAL_SURFACE' in step.content
             assert report['curve_reconstruction']['accepted_components'] == 1
             assert report['curve_reconstruction']['reimported_step_distances'][0]['max'] <= .05
+        if name == 'reduced-box':
+            assert report['simplification']['applied'] and report['conversion_mesh']['faces'] <= 300
+            assert report['verification']['original_surface_deviation']['passed']
+            reduced = client.get(f"/api/jobs/{job['task_id']}/files/simplified", headers=headers)
+            reduced.raise_for_status()
+            assert len(reduced.content) > 84
         print(json.dumps({'model': name, 'state': value['state'], 'faces': result['faces'],
                           'surface_types': report['surface_types'], 'volume': result['volume'],
                           'step_bytes': len(step.content)}))

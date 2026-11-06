@@ -2,9 +2,10 @@
 
 Công cụ web chuyển STL sang solid B-rep và STEP, có báo cáo lỗi hình học và kiểm tra lại file sau xuất. Repo: `pipipepea/STLTOSTP`.
 
-## Bản 0.2 làm được gì?
+## Bản 0.3 làm được gì?
 
 - Tải STL ASCII/binary, xem 3D bằng Three.js; parse trong Web Worker.
+- Giảm lưới theo tùy chọn trước khi dựng CAD, có giới hạn sai lệch, thể tích và kiểm tra topology/cạnh sắc; tải STL đã giảm riêng, giữ nguyên nguồn.
 - FastAPI nhận file, trả `task_id`; Celery + Redis xử lý nền. Tiến độ qua WebSocket, có polling dự phòng.
 - Phát hiện cạnh hở, cạnh phi đa tạp, mặt trùng, mặt suy biến và ghi tọa độ vùng bao lỗi vào JSON.
 - Chỉ hàn các đỉnh có tọa độ bằng nhau chính xác; loại mặt trùng/suy biến và sửa hướng mặt. Không tự vá lỗ hoặc làm mịn.
@@ -16,6 +17,18 @@ Công cụ web chuyển STL sang solid B-rep và STEP, có báo cáo lỗi hình
 - File bị từ chối truy cập sau 24 giờ; Celery Beat dọn file trong lần chạy hàng giờ kế tiếp (thời gian lưu vật lý có thể tới 25 giờ). Không lưu file người dùng vào Git.
 
 **Phạm vi hình học:** fitting hình học có kiểm chứng, chưa dùng AI. Chỉ thay các thành phần/biên dạng thuộc nhóm được hỗ trợ và đạt dung sai; các vùng còn lại giữ mặt tam giác. Chưa khớp NURBS tự do, mọi fillet/loft hoặc lỗ xiên/độ sâu thay đổi. Sai lệch bề mặt là số đo lấy mẫu, không phải bảo đảm Hausdorff liên tục. Mesh self-intersection chưa được kiểm tra đầy đủ; BRepCheck không thay thế mọi kiểm tra tự giao. Chưa chứng nhận dùng trực tiếp cho sản xuất.
+
+## Lưới vượt 30.000 mặt: giảm trước khi chuyển
+
+1. Bật **Giảm lưới trước chuyển đổi**. Mặc định không bật để không tự thay đổi hình dạng.
+2. Với lưới 45.844 mặt, có thể bắt đầu với **25.000 mặt đích**, dung sai **0.05 nếu đơn vị là mm**. Không bảo đảm file cụ thể đạt mục tiêu trước khi chạy kiểm tra.
+3. Chuyển đổi, xem báo cáo giảm lưới và tải **STL đã giảm lưới** hoặc STEP. Nếu không đạt dung sai/topology/cạnh sắc, hệ thống dừng; hãy thử số mặt đích cao hơn (tối đa giới hạn CAD) thay vì ép giảm mạnh.
+
+Mặc định đọc tối đa **200.000 mặt nguồn**, vẫn giới hạn **30.000 mặt đưa vào CAD** và 30 MB tải lên. Giảm lưới dùng VTK QuadricDecimation với volume preservation; kết quả phải kín, có cùng số thành phần và Euler, thay đổi thể tích mỗi thành phần không quá 1%, đạt kiểm tra cạnh sắc từ 30° và sai lệch hai chiều lấy mẫu. Thành phần nhỏ không quá 128 mặt được giữ nguyên. Đây không phải chứng nhận bảo toàn mọi chi tiết hay kiểm tra tự giao đầy đủ.
+
+Dung sai giảm lưới và dung sai phục dựng cong là **hai bước riêng**: nếu đều là 0.05 mm, ngân sách cộng là 0.10 mm, cộng dung sai tessellation khi đo bản xem STEP. STEP cuối được đo bổ sung so với lưới gốc đã sửa, không chỉ so với lưới đã giảm. Số đo lấy mẫu chưa phải cận sai lệch liên tục.
+
+API có thêm `simplify_mesh` (mặc định `false`), `target_faces` (mặc định `min(25000, MAX_FACES)`), `simplify_tolerance` (mặc định `0.05` đơn vị nguồn). `/api/config` trả giới hạn thực để giao diện cập nhật. Báo cáo có `simplification`, `conversion_mesh` và `verification.original_surface_deviation`.
 
 ## Dùng phục dựng bề mặt cong
 
@@ -70,7 +83,8 @@ Không thêm `-v` vào lệnh `down` nếu cần giữ dữ liệu hiện tại.
 | `API_KEY` | bắt buộc | Khóa ngẫu nhiên ít nhất 24 ký tự |
 | `HTTP_PORT` | 8080 | Cổng loopback của web |
 | `MAX_UPLOAD_MB` | 30 | Giới hạn tải lên của API; frontend/Nginx mặc định 30/31 MB |
-| `MAX_FACES` | 30000 | Chặn lưới quá lớn trước khi dựng CAD |
+| `MAX_FACES` | 30000 | Giới hạn lưới đưa vào CAD sau giảm |
+| `MAX_INPUT_FACES` | 200000 | Giới hạn số mặt đọc từ STL nguồn |
 | `RETENTION_HOURS` | 24 | Thời gian hết hạn truy cập file |
 | `JOB_TIMEOUT_SECONDS` | 900 | Giới hạn xử lý mỗi job; phải lớn hơn 20 |
 

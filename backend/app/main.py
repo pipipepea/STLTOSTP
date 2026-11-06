@@ -10,7 +10,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import FileResponse
-from .config import API_KEY, DATA, MAX_UPLOAD, JOB_TIMEOUT
+from .config import API_KEY, DATA, MAX_UPLOAD, JOB_TIMEOUT, MAX_FACES, MAX_INPUT_FACES
 from .store import directory, status, update, write_json
 from .tasks import celery, convert_job
 
@@ -23,7 +23,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title='STL to STP', version='0.2.0', lifespan=lifespan)
+app = FastAPI(title='STL to STP', version='0.3.0', lifespan=lifespan)
 
 
 def require_key(x_api_key: Annotated[str | None, Header()] = None):
@@ -63,7 +63,10 @@ async def submit(file: Annotated[UploadFile, File()],
                  merge_planes: Annotated[bool, Form()] = True,
                  curve_mode: Annotated[str, Form()] = 'off',
                  fit_tolerance: Annotated[float, Form()] = .05,
-                 max_volume_change: Annotated[float, Form()] = .02):
+                 max_volume_change: Annotated[float, Form()] = .02,
+                 simplify_mesh: Annotated[bool, Form()] = False,
+                 target_faces: Annotated[int | None, Form()] = None,
+                 simplify_tolerance: Annotated[float, Form()] = .05):
     if unit not in {'mm', 'cm', 'm', 'inch'}:
         raise HTTPException(422, 'Đơn vị không được hỗ trợ.')
     if curve_mode not in {'off', 'auto', 'required'}:
@@ -72,6 +75,11 @@ async def submit(file: Annotated[UploadFile, File()],
         raise HTTPException(422, 'Dung sai phải là số hữu hạn lớn hơn 0.')
     if not math.isfinite(max_volume_change) or not 0 < max_volume_change <= .05:
         raise HTTPException(422, 'Giới hạn thay đổi thể tích phải lớn hơn 0 và không quá 5%.')
+    target_faces = min(25000, MAX_FACES) if target_faces is None else target_faces
+    if not 4 <= target_faces <= MAX_FACES:
+        raise HTTPException(422, f'Số mặt đích phải từ 4 đến {MAX_FACES}.')
+    if not math.isfinite(simplify_tolerance) or simplify_tolerance <= 0:
+        raise HTTPException(422, 'Dung sai giảm lưới phải hữu hạn và lớn hơn 0.')
     if not (file.filename or '').lower().endswith('.stl'):
         raise HTTPException(422, 'Chỉ nhận file .stl.')
     job_id = str(uuid4())
@@ -91,8 +99,10 @@ async def submit(file: Annotated[UploadFile, File()],
         update(job_id, 'queued', 0, 'Đang chờ worker', token=token,
                filename=(file.filename or 'source.stl').replace('\\', '/').split('/')[-1][:200],
                unit=unit, size_bytes=total, curve_mode=curve_mode, fit_tolerance=fit_tolerance,
-               max_volume_change=max_volume_change)
-        convert_job.apply_async(args=[job_id, unit, merge_planes, curve_mode, fit_tolerance, max_volume_change],
+               max_volume_change=max_volume_change, simplify_mesh=simplify_mesh,
+               target_faces=target_faces, simplify_tolerance=simplify_tolerance)
+        convert_job.apply_async(args=[job_id, unit, merge_planes, curve_mode, fit_tolerance, max_volume_change,
+                                     simplify_mesh, target_faces, simplify_tolerance],
                                 task_id=job_id, expires=JOB_TIMEOUT)
     except HTTPException:
         shutil.rmtree(folder, ignore_errors=True)
@@ -105,6 +115,12 @@ async def submit(file: Annotated[UploadFile, File()],
     return {'task_id': job_id, 'token': token}
 
 
+@app.get('/api/config')
+def config():
+    return {'version': app.version, 'max_input_faces': MAX_INPUT_FACES, 'max_cad_faces': MAX_FACES,
+            'max_upload_bytes': MAX_UPLOAD, 'default_target_faces': min(25000, MAX_FACES)}
+
+
 @app.get('/api/jobs/{job_id}')
 def get_status(job_id: UUID, x_job_token: Annotated[str | None, Header()] = None):
     return public_status(get_job(job_id, x_job_token))
@@ -114,6 +130,7 @@ FILES = {'step': ('result.step', 'application/step'),
          'report': ('report.json', 'application/json'),
          'source': ('source.stl', 'model/stl'),
          'repaired': ('repaired.stl', 'model/stl'),
+         'simplified': ('simplified.stl', 'model/stl'),
          'preview': ('preview.stl', 'model/stl')}
 
 

@@ -74,7 +74,8 @@ export default function CurveReport({ reconstruction, surfaceTypes, unit }) {
                 <td>
                   #{(c.component ?? i) + 1}
                   <small>
-                    {c.source_faces?.toLocaleString("vi-VN")} tam giác gốc
+                    {c.source_faces?.toLocaleString("vi-VN")} tam giác đầu vào
+                    CAD
                   </small>
                 </td>
                 <td>

@@ -1,10 +1,13 @@
-# Kết quả kiểm thử v0.2
+# Kết quả kiểm thử v0.3
 
 Kiểm thử thực hiện ngày 2026-11-05.
 
 ## Đã kiểm tra trong môi trường phát triển
 
-- **46 kiểm thử Python thành công** trong môi trường phát triển, dùng OCCT 7.8.1.1 qua `cadquery-ocp`, gồm các kiểm thử 0.1 và phục dựng cong bên dưới. Kết quả chạy container được ghi trong GitHub Actions.
+- 65 kiểm thử Python đã qua trong môi trường phát triển, dùng OCCT 7.8.1.1 qua `cadquery-ocp`, gồm kiểm thử 0.1, phục dựng cong và giảm lưới. Kết quả chạy container được ghi trong GitHub Actions.
+- Mẫu hộp 49.152 mặt giảm xuống dưới 25.000 mặt, đạt độ kín/Euler/cạnh sắc/thể tích và sai lệch lấy mẫu; chưa thử file 45.844 mặt cụ thể của người dùng vì chưa nhận file.
+- Pipeline giảm hộp → STEP 6 mặt: giữ nguyên byte STL nguồn, có STL giảm riêng và kiểm tra STEP so với nguồn gốc. Thử độc lập giảm cầu 5.120 → 2.000 mặt → sphere thật, với kiểm tra sai lệch cộng dồn.
+- Kiểm tra trường hợp không bật giảm lưới, lưới hở, dung sai quá chặt, thành phần nhỏ rời nhau, kết quả sai topology và tham số API không hợp lệ.
 - Khối hộp 20 × 30 × 12: 12 tam giác đầu vào → 6 mặt B-rep; 1 solid hợp lệ, thể tích 7.200 đơn vị khối.
 - Các đơn vị mm/cm/m/inch: kiểm tra số tọa độ sau round-trip và dùng một reader độc lập đọc sang mm để đối chiếu kích thước vật lý.
 - Lưới hở: báo tọa độ cạnh lỗi, không có file STEP để tải.
